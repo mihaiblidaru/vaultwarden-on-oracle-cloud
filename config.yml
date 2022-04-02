@@ -1,0 +1,9 @@
+root_compartment_id: <oracle-cloud-root-compartment-id>
+region: eu-zurich-1
+duck_dns_token: <duck-dns-token>
+duck_dns_domain: <duck-dns-domain>
+email: <email-for-lets-encrypt-registration>
+vaultwarden_admin_token: <vault-warden-admin-token>
+tf-prefix: <terraform-resource-name-prefix>
+instance-shape: VM.Standard.E2.1.Micro # Included in the Always Free Tier 
+instance-image: ocid1.image.oc1.eu-zurich-1.aaaaaaaajnd3h3nq2hotdp4hctcfgib5aaao6dx43jr6zu65bgtrour6b24q # Ubuntu 20.04 in eu-zurich-1 region

@@ -1,0 +1,4 @@
+*.key
+*.zip
+backend.tf
+.terraform*

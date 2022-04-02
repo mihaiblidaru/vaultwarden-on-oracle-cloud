@@ -1,0 +1,75 @@
+version: '3'
+
+services:
+  postgres:
+    image: postgres:14.2-alpine
+    restart: always
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=vaultwarden
+      - POSTGRES_USER=vaultwarden
+    networks:
+      - vaultwarden-database-network
+
+  vaultwarden:
+    image: vaultwarden/server:1.24.0
+
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://vaultwarden:password@postgres/vaultwarden
+      - WEBSOCKET_ENABLED=true
+      - ADMIN_TOKEN=${vaultwarden_admin_token}
+
+    volumes:
+      - ./vault-data/vaultwarden:/data
+
+    depends_on:
+      - postgres
+
+    networks:
+      - caddy-reverse-proxy-network
+      - vaultwarden-database-network
+
+  caddy-reverse-proxy:
+    image: caddy:2.4.6
+    restart: always
+    depends_on:
+      - vaultwarden
+      - duck-dns-refresher
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./Caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./vault-data/caddy-config:/config
+      - ./vault-data/caddy-data:/data
+    environment:
+      - DOMAIN=https://${duck_dns_domain}.duckdns.org
+      - EMAIL=${email}
+      - LOG_FILE=/data/access.log
+      - DUCKDNS_TOKEN=b7f01f47-d75c-4f8f-8787-5fa9d58ec666
+    networks:
+      - caddy-reverse-proxy-network
+
+  duck-dns-refresher:
+    build: ./duck-dns-refresher
+    image: duck-dns-refresher:latest
+    restart: always
+    
+    environment:
+      - DUCK_DNS_DOMAIN_PREFIX=${duck_dns_domain}
+      - DUCK_DNS_TOKEN=${duck_dns_token}
+      - REFRESH_INTERVAL=300
+    networks:
+      - auxiliary-network
+
+# Multiple networks to isolate services
+networks:
+  vaultwarden-database-network:
+    name: vaultwarden-database-network
+  caddy-reverse-proxy-network:
+    name: caddy-reverse-proxy-network
+  auxiliary-network:
+    name: auxiliary-network
