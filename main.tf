@@ -28,8 +28,8 @@ data "oci_objectstorage_namespace" "object_storage_namespace" {
 
 resource "oci_identity_compartment" "identity_compartment" {
     compartment_id = local.config_file["root_compartment_id"]
-    description = "Compartment for Terraform resources."
-    name = "vaultwarden-compartment"
+    description = "Compartment for Terraform resources2."
+    name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-compartment"
 }
 
 resource "oci_core_vcn" "vaultwarden_vcn" {
@@ -37,7 +37,7 @@ resource "oci_core_vcn" "vaultwarden_vcn" {
     cidr_blocks = [
         "10.0.0.0/16"
     ]
-    display_name = "${lookup(local.config_file, "tf-prefix", "tf")}-vaultwarden-vcn"
+    display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-vcn"
 }
 
 resource "oci_core_internet_gateway" "vaultwarden_vcn_internet_gateway" {
@@ -49,7 +49,7 @@ resource "oci_core_route_table" "vaultwarden_vcn_subnet_route_table" {
     compartment_id = oci_identity_compartment.identity_compartment.id
     vcn_id = oci_core_vcn.vaultwarden_vcn.id
 
-    display_name = "${lookup(local.config_file, "tf-prefix", "tf")}-vaultwarden-vcn-route-table"
+    display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-vcn-route-table"
     route_rules {
         network_entity_id = oci_core_internet_gateway.vaultwarden_vcn_internet_gateway.id
         cidr_block = "0.0.0.0/0"
@@ -69,7 +69,7 @@ resource "oci_core_subnet" "vaultwarden_vcn_subnet" {
 resource "oci_core_security_list" "vaultwarden_vcn_subnet_security_list" {
     compartment_id = oci_identity_compartment.identity_compartment.id
     vcn_id = oci_core_vcn.vaultwarden_vcn.id
-    display_name = "${lookup(local.config_file, "tf-prefix", "tf")}-vaultwarden-vcb-subnet-security-list"
+    display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-vcb-subnet-security-list"
     egress_security_rules {
         protocol = "6"
         destination = "0.0.0.0/0"
@@ -117,13 +117,13 @@ resource "tls_private_key" "ssh_key" {
 
 resource "oci_objectstorage_bucket" "userdata" {
     compartment_id = oci_identity_compartment.identity_compartment.id
-    name = "userdata"
+    name = "${lookup(local.config_file, "tf_prefix", "tf")}-userdata"
     namespace = data.oci_objectstorage_namespace.object_storage_namespace.namespace
 }
 
 resource "oci_objectstorage_bucket" "application" {
     compartment_id = oci_identity_compartment.identity_compartment.id
-    name = "application"
+    name = "${lookup(local.config_file, "tf_prefix", "tf")}-application"
     namespace = data.oci_objectstorage_namespace.object_storage_namespace.namespace
 }
 
@@ -186,7 +186,7 @@ resource "oci_core_volume" "persistent_storage_volume" {
     compartment_id = oci_identity_compartment.identity_compartment.id
     availability_domain = data.oci_identity_availability_domains.availability_domains.availability_domains[0].name
     size_in_gbs = 50
-    display_name = "${lookup(local.config_file, "tf-prefix", "tf")}-persistent-storage"
+    display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-persistent-storage"
 }
 
 resource "oci_core_volume_attachment" "persistent_storage_volume_attachment" {
@@ -201,20 +201,16 @@ data "oci_core_images" "test_images" {
     compartment_id = oci_identity_compartment.identity_compartment.id
 }
 
-output "aaaaaa" {
-    value = data.oci_core_images.test_images.images
-}
-
 resource "oci_core_instance" "vaultwarden_instance" {
     availability_domain = data.oci_identity_availability_domains.availability_domains.availability_domains[0].name
     compartment_id = oci_identity_compartment.identity_compartment.id
-    shape = local.config_file["instance-shape"]
+    shape = local.config_file["instance_shape"]
     source_details {
         source_id =   "ocid1.image.oc1.eu-zurich-1.aaaaaaaajnd3h3nq2hotdp4hctcfgib5aaao6dx43jr6zu65bgtrour6b24q"
         source_type = "image"
     }
 
-    display_name = "${lookup(local.config_file, "tf-prefix", "tf")}-vaultwarden-on-ubuntu"
+    display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-on-ubuntu"
     create_vnic_details {
         assign_public_ip = true
         subnet_id = oci_core_subnet.vaultwarden_vcn_subnet.id
@@ -241,7 +237,7 @@ resource "oci_identity_dynamic_group" "vaultwarden_instance_dynamic_group" {
 resource "oci_identity_policy" "vaultwarden_instance_dynamic_group_policy" {
     compartment_id = local.config_file["root_compartment_id"]
     description = "vaultwarden-instance-dynamic-group-policy"
-    name = "vaultwarden-instance-dynamic-group-policy"
+    name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-instance-dynamic-group-policy"
     statements = [
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read buckets in tenancy where target.bucket.name='${oci_objectstorage_bucket.userdata.name}'",
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.userdata.name}'",
@@ -251,19 +247,19 @@ resource "oci_identity_policy" "vaultwarden_instance_dynamic_group_policy" {
 }
 resource "oci_kms_key" "vaultwarden_kms_key" {
     compartment_id = oci_identity_compartment.identity_compartment.id
-    display_name = "${lookup(local.config_file, "tf-prefix", "tf")}-vaultwarden-kms-key"
+    display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-kms-key"
     key_shape {
         algorithm = "AES"
         length = "32"
     }
-    management_endpoint = oci_kms_vault.vaultwarden_kms_vault.management_endpoint
+    management_endpoint = data.oci_kms_vault.vaultwarden_kms_vault.management_endpoint
 }
 
-resource "oci_kms_vault" "vaultwarden_kms_vault" {
-    compartment_id = oci_identity_compartment.identity_compartment.id
-    display_name = "${lookup(local.config_file, "tf-prefix", "tf")}-vaultwarden-kms-vault"
-    vault_type = "DEFAULT"
-}
+# resource "oci_kms_vault" "vaultwarden_kms_vault" {
+#     compartment_id = oci_identity_compartment.identity_compartment.id
+#     display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-kms-vault"
+#     vault_type = "DEFAULT"
+# }
 
 resource "oci_vault_secret" "ssh_key_secret" {
     compartment_id = oci_identity_compartment.identity_compartment.id
@@ -271,11 +267,11 @@ resource "oci_vault_secret" "ssh_key_secret" {
     secret_content {
       content_type = "BASE64"
       content = base64encode(tls_private_key.ssh_key.private_key_pem)
-      name = "vaultwarden-ssh-key"
+      name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-ssh-key"
     }
 
-    secret_name = "${lookup(local.config_file, "tf-prefix", "tf")}-vaultwarden-ssh-key"
-    vault_id = oci_kms_vault.vaultwarden_kms_vault.id
+    secret_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-ssh-key"
+    vault_id = data.oci_kms_vault.vaultwarden_kms_vault.id
 }
 
 output "public_ip" {
