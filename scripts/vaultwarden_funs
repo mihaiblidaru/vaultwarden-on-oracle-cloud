@@ -11,13 +11,13 @@ get_tf_prefix () {
 instance_ssh() {
   local vaultwarden_compartment=$(oci iam compartment list | jq ".data[] | select (.name == \"$(get_tf_prefix)-vaultwarden-compartment\")" | jq -r ".id")
   local secret_id=$(oci vault secret list --compartment-id ${vaultwarden_compartment} | jq ".data[] | select (.\"secret-name\" == \"$(get_tf_prefix)-vaultwarden-ssh-key\")" | jq -r ".id")
-  local instance_id=$(oci compute instance list --compartment-id ${vaultwarden_compartment} | jq ".data[] | select (.\"display-name\" == \"$(get_tf_prefix)-vaultwarden-on-ubuntu\")" | jq -r ".id" )
+  local instance_id=$(oci compute instance list --compartment-id ${vaultwarden_compartment} | jq ".data[] | select ((.\"display-name\" == \"$(get_tf_prefix)-vaultwarden-on-ubuntu\") and (.\"lifecycle-state\" == \"RUNNING\"))" | jq -r ".id" )
   local public_ip=$(oci compute instance list-vnics --instance-id ${instance_id} | jq -r '.data[0]."public-ip"')
 
   local SSH_KEY=$(mktemp -p /run/user/${UID})
   trap "rm -f ${SSH_KEY}; trap - RETURN" RETURN
   oci secrets secret-bundle get --secret-id ${secret_id} | jq -r '.data."secret-bundle-content".content' | base64 -d > ${SSH_KEY}
 
-  ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ubuntu@${public_ip}
+  ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR vaultwarden@${public_ip}
   rm -f ${SSH_KEY}
 }

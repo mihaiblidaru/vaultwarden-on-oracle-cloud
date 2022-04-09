@@ -2,14 +2,15 @@
 exec &> /var/log/userdata_on_startup.log
 set -x
 apt-get update -y
-apt-get install python3-pip -y
+apt-get upgrade -y
+apt-get install python3-pip jq -y
 
 pip3 install oci_cli
 
 mkdir -p /opt/userdata/
 
 export OCI_CLI_AUTH=instance_principal
-
+export USER_DATA_BUCKET=$(curl -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/metadata/user_data_bucket)
 while true
 do
     oci iam region list > /dev/null 2>&1
@@ -21,8 +22,8 @@ do
     sleep 5
 done
 
-oci os object get --bucket-name userdata --name on_init.sh --file /opt/userdata/on_init.sh
-oci os object get --bucket-name userdata --name on_reboot.sh --file /opt/userdata/on_reboot.sh
+oci os object get --bucket-name ${USER_DATA_BUCKET} --name on_init.sh --file /opt/userdata/on_init.sh
+oci os object get --bucket-name ${USER_DATA_BUCKET} --name on_reboot.sh --file /opt/userdata/on_reboot.sh
 
 chmod 744 /opt/userdata/on_init.sh
 chmod 744 /opt/userdata/on_reboot.sh
@@ -44,8 +45,6 @@ systemctl daemon-reload
 systemctl enable user-data-on-reboot.service
 
 bash -x /opt/userdata/on_init.sh
-
-apt-get upgrade -y
 
 reboot
 

@@ -3,7 +3,7 @@
 exec &> /var/log/userdata_on_reboot.$(date +"%Y%m%d%H%M%S").log
 set -x
 
-su - ubuntu -c '
+su - vaultwarden -c '
 set -x
 source ~/.profile
 date > ~/reboot_time.log

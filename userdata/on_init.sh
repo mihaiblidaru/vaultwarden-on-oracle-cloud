@@ -7,29 +7,48 @@ apt-get install -y \
   zip \
   unzip
 
+# Add docker group
 groupadd docker
-usermod -aG docker ubuntu
 
-su - ubuntu -c '
-mkdir -p ~/.docker/cli-plugins/
-wget -q https://github.com/docker/compose/releases/download/v2.4.0/docker-compose-linux-x86_64 -O ~/.docker/cli-plugins/docker-compose
-chmod +x ~/.docker/cli-plugins/docker-compose
+export OCI_CLI_AUTH=instance_principal
+
+# Set root password
+ROOT_PASSWORD_HASH_SECRET_ID=$(curl -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/metadata/root_password_hash_secret_id)
+usermod -p $(oci secrets secret-bundle get --secret-id ${ROOT_PASSWORD_HASH_SECRET_ID} | jq -r '.data."secret-bundle-content".content' | base64 -d) root
+
+# Add vaultwarden user
+useradd -m vaultwarden -s /bin/bash
+usermod -aG docker vaultwarden
+
+# Install ssh public key
+su - vaultwarden -c '
+mkdir -p ${HOME}/.ssh
+curl -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/metadata/ssh_authorized_keys > ${HOME}/.ssh/authorized_keys
 '
 
-export OCI_CLI_AUTH=instance_principal
+# Remove ubuntu default user
+userdel -rf ubuntu
 
-su - ubuntu -c '
-cat << EOF >> /home/ubuntu/.profile
+# Install docker compose for vaultwarden user
+su - vaultwarden -c '
+mkdir -p ${HOME}/.docker/cli-plugins/
+wget -q https://github.com/docker/compose/releases/download/v2.4.0/docker-compose-linux-x86_64 -O ${HOME}/.docker/cli-plugins/docker-compose
+chmod +x ${HOME}/.docker/cli-plugins/docker-compose
+'
+
+# Export
+su - vaultwarden -c '
+cat << EOF >> ${HOME}/.profile
 export OCI_CLI_AUTH=instance_principal
-export GID=$(id -g)
 EOF
 '
 
-su - ubuntu -c '
+# Download application 
+su - vaultwarden -c '
 set -x
-source ~/.profile
 cd $HOME
-oci os object get --bucket-name application --name application.zip --file - | base64 -d > application.zip
+export APPLICATION_BUCKET=$(curl -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/metadata/application_bucket)
+oci os object get --bucket-name ${APPLICATION_BUCKET} --name application.zip --file - | base64 -d > application.zip
 unzip -o application.zip
 set +x
 '

@@ -52,7 +52,7 @@ resource "oci_core_route_table" "vaultwarden_vcn_subnet_route_table" {
     display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-vcn-route-table"
     route_rules {
         network_entity_id = oci_core_internet_gateway.vaultwarden_vcn_internet_gateway.id
-        cidr_block = "0.0.0.0/0"
+        destination  = "0.0.0.0/0"
     }
 }
 
@@ -104,6 +104,7 @@ resource "oci_core_security_list" "vaultwarden_vcn_subnet_security_list" {
             min = 443
         }
     }
+
 }
 
 data "oci_identity_availability_domains" "availability_domains" {
@@ -124,6 +125,12 @@ resource "oci_objectstorage_bucket" "userdata" {
 resource "oci_objectstorage_bucket" "application" {
     compartment_id = oci_identity_compartment.identity_compartment.id
     name = "${lookup(local.config_file, "tf_prefix", "tf")}-application"
+    namespace = data.oci_objectstorage_namespace.object_storage_namespace.namespace
+}
+
+resource "oci_objectstorage_bucket" "backups" {
+    compartment_id = oci_identity_compartment.identity_compartment.id
+    name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-backups"
     namespace = data.oci_objectstorage_namespace.object_storage_namespace.namespace
 }
 
@@ -201,6 +208,17 @@ data "oci_core_images" "test_images" {
     compartment_id = oci_identity_compartment.identity_compartment.id
 }
 
+resource "random_password" "instance_root_password" {
+  length  = 24
+  special = false
+  override_special = "!@#$%-_+:"
+}
+resource "random_string" "instance_root_password_salt" {
+  length = 16
+  special = false
+  override_special = "!@#$%-_+:"
+}
+
 resource "oci_core_instance" "vaultwarden_instance" {
     availability_domain = data.oci_identity_availability_domains.availability_domains.availability_domains[0].name
     compartment_id = oci_identity_compartment.identity_compartment.id
@@ -208,6 +226,13 @@ resource "oci_core_instance" "vaultwarden_instance" {
     source_details {
         source_id =   "ocid1.image.oc1.eu-zurich-1.aaaaaaaajnd3h3nq2hotdp4hctcfgib5aaao6dx43jr6zu65bgtrour6b24q"
         source_type = "image"
+    }
+
+    agent_config {
+      plugins_config {
+          desired_state = "ENABLED"
+          name = "Bastion"
+      }
     }
 
     display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-on-ubuntu"
@@ -218,6 +243,11 @@ resource "oci_core_instance" "vaultwarden_instance" {
     metadata = {
       ssh_authorized_keys = tls_private_key.ssh_key.public_key_openssh
       user_data = base64encode(file("userdata/on_startup.sh"))
+      resource_prefix = lookup(local.config_file, "tf_prefix", "tf")
+      user_data_bucket = oci_objectstorage_bucket.userdata.name
+      application_bucket = oci_objectstorage_bucket.application.name
+      backup_bucket = oci_objectstorage_bucket.backups.name
+      root_password_hash_secret_id = oci_vault_secret.root_password_hash_secret.id
     }
 
     preserve_boot_volume = false
@@ -243,6 +273,8 @@ resource "oci_identity_policy" "vaultwarden_instance_dynamic_group_policy" {
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.userdata.name}'",
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read buckets in tenancy where target.bucket.name='${oci_objectstorage_bucket.application.name}'",
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.application.name}'",
+        "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read secret-bundles in tenancy where target.secret.id='${oci_vault_secret.root_password_hash_secret.id}'",
+
     ]
 }
 resource "oci_kms_key" "vaultwarden_kms_key" {
@@ -266,13 +298,57 @@ resource "oci_vault_secret" "ssh_key_secret" {
     key_id = oci_kms_key.vaultwarden_kms_key.id
     secret_content {
       content_type = "BASE64"
-      content = base64encode(tls_private_key.ssh_key.private_key_pem)
-      name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-ssh-key"
+      content = sensitive(base64encode(tls_private_key.ssh_key.private_key_pem))
     }
 
     secret_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-ssh-key"
     vault_id = data.oci_kms_vault.vaultwarden_kms_vault.id
 }
+
+data "external" "root_password_hash" {
+  program = ["scripts/sha512_crypt.sh", "${random_string.instance_root_password_salt.result}", random_password.instance_root_password.result]
+  query = {
+    salt = random_string.instance_root_password_salt.result
+    password = random_password.instance_root_password.result
+  }
+}
+
+resource "oci_vault_secret" "root_password_secret" {
+    compartment_id = oci_identity_compartment.identity_compartment.id
+    key_id = oci_kms_key.vaultwarden_kms_key.id
+    secret_content {
+      content_type = "BASE64"
+      content = sensitive(base64encode(random_password.instance_root_password.result))
+    }
+
+    secret_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-root-password"
+    vault_id = data.oci_kms_vault.vaultwarden_kms_vault.id
+}
+
+resource "oci_vault_secret" "root_password_hash_secret" {
+    compartment_id = oci_identity_compartment.identity_compartment.id
+    key_id = oci_kms_key.vaultwarden_kms_key.id
+    secret_content {
+      content_type = "BASE64"
+      content = sensitive(base64encode(data.external.root_password_hash.result.hash))
+    }
+
+    secret_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-root-password-hash"
+    vault_id = data.oci_kms_vault.vaultwarden_kms_vault.id
+}
+
+
+
+# resource "oci_bastion_bastion" "vaultwarden_ssh_bastion" {
+#     bastion_type = "standard"
+#     compartment_id = oci_identity_compartment.identity_compartment.id
+#     target_subnet_id = oci_core_subnet.vaultwarden_vcn_subnet.id
+#     client_cidr_block_allow_list = [
+#         "0.0.0.0/0"
+#     ]
+#     max_session_ttl_in_seconds = 3600
+#     name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-ssh-bastion"
+# }
 
 output "public_ip" {
     value = oci_core_instance.vaultwarden_instance.public_ip
