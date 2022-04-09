@@ -128,7 +128,7 @@ resource "oci_objectstorage_bucket" "application" {
     namespace = data.oci_objectstorage_namespace.object_storage_namespace.namespace
 }
 
-resource "oci_objectstorage_bucket" "backups" {
+resource "oci_objectstorage_bucket" "vaultwarden_backups" {
     compartment_id = oci_identity_compartment.identity_compartment.id
     name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-backups"
     namespace = data.oci_objectstorage_namespace.object_storage_namespace.namespace
@@ -142,7 +142,11 @@ variable "application_src_files" {
       "application/duck-dns-refresher/container_healthcheck.sh",
       "application/duck-dns-refresher/refresh_duck_dns.sh",
       "application/duck-dns-refresher/Dockerfile",
-      "application/Caddy/Caddyfile"
+      "application/Caddy/Caddyfile",
+      "application/vaultwarden-backup/container_healthcheck.sh",
+      "application/vaultwarden-backup/backup.sh",
+      "application/vaultwarden-backup/setup_crontab.sh",
+      "application/vaultwarden-backup/Dockerfile",
     ]
 }
 
@@ -246,7 +250,6 @@ resource "oci_core_instance" "vaultwarden_instance" {
       resource_prefix = lookup(local.config_file, "tf_prefix", "tf")
       user_data_bucket = oci_objectstorage_bucket.userdata.name
       application_bucket = oci_objectstorage_bucket.application.name
-      backup_bucket = oci_objectstorage_bucket.backups.name
       root_password_hash_secret_id = oci_vault_secret.root_password_hash_secret.id
     }
 
@@ -259,20 +262,23 @@ resource "oci_core_instance" "vaultwarden_instance" {
 
 resource "oci_identity_dynamic_group" "vaultwarden_instance_dynamic_group" {
     compartment_id = local.config_file["root_compartment_id"]
-    description = "vaultwarden-instance-dynamic-group"
+    description = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-instance-dynamic-group"
     matching_rule = "Any { instance.id = '${oci_core_instance.vaultwarden_instance.id}' }"
-    name =  "vaultwarden-instance-dynamic-group"
+    name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-instance-dynamic-group"
 }
 
 resource "oci_identity_policy" "vaultwarden_instance_dynamic_group_policy" {
     compartment_id = local.config_file["root_compartment_id"]
-    description = "vaultwarden-instance-dynamic-group-policy"
+    description = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-instance-dynamic-group-policy"
     name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-instance-dynamic-group-policy"
     statements = [
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read buckets in tenancy where target.bucket.name='${oci_objectstorage_bucket.userdata.name}'",
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.userdata.name}'",
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read buckets in tenancy where target.bucket.name='${oci_objectstorage_bucket.application.name}'",
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.application.name}'",
+        "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read buckets in tenancy where target.bucket.name='${oci_objectstorage_bucket.vaultwarden_backups.name}'",
+        "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.vaultwarden_backups.name}'",
+        "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to manage objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.vaultwarden_backups.name}'",
         "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read secret-bundles in tenancy where target.secret.id='${oci_vault_secret.root_password_hash_secret.id}'",
 
     ]

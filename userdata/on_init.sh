@@ -43,6 +43,20 @@ export OCI_CLI_AUTH=instance_principal
 EOF
 '
 
+# Mount persistent filesystem
+NUM_PARTITIONS=$(partx -g /dev/oracleoci/oraclevdr | wc -l)
+
+if [ "${NUM_PARTITIONS}" == 0 ]; then
+  parted /dev/oracleoci/oraclevdr --script mklabel gpt
+  parted -a optimal /dev/oracleoci/oraclevdr --script mkpart primary ext4 2048 100%
+  mkfs.ext4 /dev/oracleoci/oraclevdr1
+  mkdir -p /mnt/persinstent_storage/
+fi
+
+echo "/dev/oracleoci/oraclevdr1 /mnt/persinstent_storage/ ext4 defaults,_netdev,nofail 0 2" >> /etc/fstab
+
+mount -a
+
 # Download application 
 su - vaultwarden -c '
 set -x

@@ -5,7 +5,7 @@ services:
     image: postgres:14.2-alpine
     restart: always
     volumes:
-      - ./postgres-data:/var/lib/postgresql/data
+      - /mnt/persinstent_storage/postgres-data/:/var/lib/postgresql/data
     environment:
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=vaultwarden
@@ -23,7 +23,7 @@ services:
       - ADMIN_TOKEN=${vaultwarden_admin_token}
 
     volumes:
-      - ./vault-data/vaultwarden:/data
+      - /mnt/persinstent_storage/vaultwarden-data/:/data
 
     depends_on:
       - postgres
@@ -43,8 +43,8 @@ services:
       - 443:443
     volumes:
       - ./Caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./vault-data/caddy-config:/config
-      - ./vault-data/caddy-data:/data
+      - /mnt/persinstent_storage/caddy-config/:/config
+      - /mnt/persinstent_storage/caddy-data/:/data
     environment:
       - DOMAIN=https://${duck_dns_domain}.duckdns.org
       - EMAIL=${email}
@@ -64,6 +64,24 @@ services:
       - REFRESH_INTERVAL=300
     networks:
       - auxiliary-network
+
+  vaultwarden-backup:
+    build: ./vaultwarden-backup
+    image: vaultwarden-backup:latest
+    restart: always
+    
+    environment:
+      - DATABASE_URL=postgresql://vaultwarden:password@postgres/vaultwarden
+      - CRON_EXPRESION=0 3 * * *
+      - BACKUP_BUCKET_NAME=${tf_prefix}-vaultwarden-backups
+
+    networks:
+      - auxiliary-network
+      - vaultwarden-database-network
+
+    depends_on:
+      - postgres
+      - vaultwarden
 
 # Multiple networks to isolate services
 networks:
