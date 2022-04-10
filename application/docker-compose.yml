@@ -5,7 +5,7 @@ services:
     image: postgres:14.2-alpine
     restart: always
     volumes:
-      - /mnt/persinstent_storage/postgres-data/:/var/lib/postgresql/data
+      - /mnt/permanent_storage/postgres-data/:/var/lib/postgresql/data
     environment:
       - POSTGRES_PASSWORD=password
       - POSTGRES_DB=vaultwarden
@@ -23,7 +23,7 @@ services:
       - ADMIN_TOKEN=${vaultwarden_admin_token}
 
     volumes:
-      - /mnt/persinstent_storage/vaultwarden-data/:/data
+      - /mnt/permanent_storage/vaultwarden-data/:/data
 
     depends_on:
       - postgres
@@ -43,8 +43,8 @@ services:
       - 443:443
     volumes:
       - ./Caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - /mnt/persinstent_storage/caddy-config/:/config
-      - /mnt/persinstent_storage/caddy-data/:/data
+      - /mnt/permanent_storage/caddy-config/:/config
+      - /mnt/permanent_storage/caddy-data/:/data
     environment:
       - DOMAIN=https://${duck_dns_domain}.duckdns.org
       - EMAIL=${email}
@@ -69,10 +69,14 @@ services:
     build: ./vaultwarden-backup
     image: vaultwarden-backup:latest
     restart: always
+
+    volumes:
+      - /mnt/permanent_storage/vaultwarden-data/:/vaultwarden-data/
     
     environment:
       - DATABASE_URL=postgresql://vaultwarden:password@postgres/vaultwarden
-      - CRON_EXPRESION=0 3 * * *
+      - VAULTWARDEN_DATA_DIR=/vaultwarden-data/
+      - CRON_EXPRESION=${backup_cron_expresion}
       - BACKUP_BUCKET_NAME=${tf_prefix}-vaultwarden-backups
 
     networks:

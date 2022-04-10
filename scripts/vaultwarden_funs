@@ -1,23 +1,50 @@
 #!/bin/bash
 
 get_tf_prefix () {
-    local prefix=$(grep "tf_prefix" config.yml | cut -d":" -f2 | xargs)
+    local prefix=$(jq -r '.tf_prefix // "tf"' config.json)
     if [ "$prefix" == "" ]; then
         prefix = "tf"
     fi
     echo "$prefix"
 }
 
-instance_ssh() {
-  local vaultwarden_compartment=$(oci iam compartment list | jq ".data[] | select (.name == \"$(get_tf_prefix)-vaultwarden-compartment\")" | jq -r ".id")
-  local secret_id=$(oci vault secret list --compartment-id ${vaultwarden_compartment} | jq ".data[] | select (.\"secret-name\" == \"$(get_tf_prefix)-vaultwarden-ssh-key\")" | jq -r ".id")
-  local instance_id=$(oci compute instance list --compartment-id ${vaultwarden_compartment} | jq ".data[] | select ((.\"display-name\" == \"$(get_tf_prefix)-vaultwarden-on-ubuntu\") and (.\"lifecycle-state\" == \"RUNNING\"))" | jq -r ".id" )
-  local public_ip=$(oci compute instance list-vnics --instance-id ${instance_id} | jq -r '.data[0]."public-ip"')
+vaultwarden_ssh() {
+  local login_user=${1:-vaultwarden}
+  local tf_prefix=$(get_tf_prefix)
+  local vaultwarden_compartment=$(oci iam compartment list --name "${tf_prefix}-vaultwarden-compartment" --query 'data[0].id' --raw-output)
+  local instance_id=$(oci compute instance list --compartment-id ${vaultwarden_compartment} --display-name "${tf_prefix}-vaultwarden-on-ubuntu" --lifecycle-state RUNNING --query 'data[0].id' --raw-output)
+  local bastion_id=$(oci bastion bastion list --compartment-id ${vaultwarden_compartment} --all --name "${tf_prefix}-vaultwarden-ssh-bastion" --bastion-lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
 
-  local SSH_KEY=$(mktemp -p /run/user/${UID})
-  trap "rm -f ${SSH_KEY}; trap - RETURN" RETURN
-  oci secrets secret-bundle get --secret-id ${secret_id} | jq -r '.data."secret-bundle-content".content' | base64 -d > ${SSH_KEY}
+  local suffix=$(date "+%Y%m%d%H")
+  local prev_suffix=$(date -d "-1 hour" "+%Y%m%d%H")
 
-  ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR vaultwarden@${public_ip}
-  rm -f ${SSH_KEY}
+  local managed_session_id=""
+
+  managed_session_id=$(oci bastion session list --bastion-id ${bastion_id} --all --display-name "ssh-managed-session-${login_user}-${prev_suffix}" --session-lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
+  TMP_KEY_DIR=/tmp/vaultwarden-managed-ssh-${prev_suffix}/
+
+  if [ "${managed_session_id}" == "" ]; then
+    managed_session_id=$(oci bastion session list --bastion-id ${bastion_id} --all --display-name "ssh-managed-session-${login_user}-${suffix}" --session-lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
+    TMP_KEY_DIR=/tmp/vaultwarden-managed-ssh-${suffix}/
+  fi
+
+  mkdir -p ${TMP_KEY_DIR}
+  [ ! -f ${TMP_KEY_DIR}/ssh_key.pem ] && ssh-keygen -q -b 4096 -t rsa -f ${TMP_KEY_DIR}/ssh_key.pem -N ""
+
+  if [ "${managed_session_id}" == "" ]; then
+    echo -e " \e[33m*\e[0m \e[34mCreating new managed ssh session. This will take some time\e[0m"
+    cat scripts/create_managed_ssh_session.json.template | \
+      jq ".bastionId = \"${bastion_id}\"" | \
+      jq ".displayName = \"ssh-managed-session-${login_user}-${suffix}\"" | \
+      jq ".targetResourceId = \"${instance_id}\"" | \
+      jq ".targetOsUsername = \"${login_user}\"" | \
+      jq ".sshPublicKeyFile = \"${TMP_KEY_DIR}/ssh_key.pem.pub\"" > ${TMP_KEY_DIR}/create_managed_ssh_session.json
+
+    managed_session_id=$(oci bastion session create-managed-ssh --from-json file://${TMP_KEY_DIR}/create_managed_ssh_session.json --query "data.resources[0].identifier" --raw-output)
+  else
+    echo -e " \e[33m*\e[0m \e[34mUsing existing managed ssh session\e[0m"
+  fi
+
+  local command=$(oci bastion session get --session-id ${managed_session_id} --query 'data."ssh-metadata".command' --raw-output | sed "s|<privateKey>|${TMP_KEY_DIR}/ssh_key.pem|g")
+  eval $command
 }

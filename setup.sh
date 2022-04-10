@@ -1,7 +1,7 @@
 #!/bin/bash
 
-ROOT_COMPARTMENT_ID=$(grep ^root_compartment_id config.yml | cut -d ":" -f2 | xargs)
-REGION=$(grep ^region config.yml | cut -d ":" -f2 | xargs)
+ROOT_COMPARTMENT_ID=$(jq '.root_compartment_id' config.json)
+REGION=$(jq '.region' config.json)
 CREATE_BUCKET_RESPONSE=$(oci os bucket create --name terraform-states --compartment-id ${ROOT_COMPARTMENT_ID} 2>&1 )
 if [ "$?" != "0" ]; then
     BUCKET_ALREADY_EXISTS=$(echo "${CREATE_BUCKET_RESPONSE}" | grep -o BucketAlreadyExists)

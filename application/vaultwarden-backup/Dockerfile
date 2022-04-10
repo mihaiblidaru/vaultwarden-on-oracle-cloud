@@ -11,7 +11,7 @@ RUN pip3 install wheel
 RUN pip3 install oci_cli
 
 COPY setup_crontab.sh /setup_crontab.sh
-COPY backup.sh /backup.sh
+COPY vaultwarden_backup.sh /vaultwarden_backup.sh
 COPY container_healthcheck.sh /container_healthcheck.sh
 
 HEALTHCHECK CMD bash /container_healthcheck.sh

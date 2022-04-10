@@ -14,7 +14,7 @@ function ctrl_c() {
 
 cat <<EOF > crontab_file
 SHELL=/bin/bash
-${CRON_EXPRESION:-0 3 * * *} bash /backup.sh ${DATABASE_URL} ${BACKUP_BUCKET_NAME}
+${CRON_EXPRESION:-0 3 * * *} bash /vaultwarden_backup.sh ${DATABASE_URL} ${VAULTWARDEN_DATA_DIR} ${BACKUP_BUCKET_NAME}
 EOF
 
 # Install crontabfile

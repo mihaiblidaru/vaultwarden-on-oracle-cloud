@@ -1,0 +1,15 @@
+{
+  "bastionId": "",
+  "displayName": "",
+  "keyType": "PUB",
+  "maxWaitSeconds": 180,
+  "sessionTtl": "3600",
+  "sshPublicKeyFile": "",
+  "targetOsUsername": "vaultwarden",
+  "targetPort": "22",
+  "targetResourceId": "",
+  "waitForState": [
+    "SUCCEEDED"
+  ],
+  "waitIntervalSeconds": 20
+}

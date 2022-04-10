@@ -8,7 +8,6 @@ set -x
 source ~/.profile
 date > ~/reboot_time.log
 cd application
-docker compose build
 docker compose up -d
 set +x
 '

@@ -2,8 +2,7 @@
 exec &> /var/log/userdata_on_startup.log
 set -x
 apt-get update -y
-apt-get upgrade -y
-apt-get install python3-pip jq -y
+apt-get install python3-pip -y
 
 pip3 install oci_cli
 
@@ -22,8 +21,8 @@ do
     sleep 5
 done
 
-oci os object get --bucket-name ${USER_DATA_BUCKET} --name on_init.sh --file /opt/userdata/on_init.sh
-oci os object get --bucket-name ${USER_DATA_BUCKET} --name on_reboot.sh --file /opt/userdata/on_reboot.sh
+curl -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/metadata/user_data_on_init > /opt/userdata/on_init.sh
+curl -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/metadata/user_data_on_reboot > /opt/userdata/on_reboot.sh
 
 chmod 744 /opt/userdata/on_init.sh
 chmod 744 /opt/userdata/on_reboot.sh

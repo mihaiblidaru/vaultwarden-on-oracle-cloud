@@ -2,6 +2,13 @@
 exec &> >(tee -a "/var/log/userdata_on_init.log")
 set -x
 
+# Add vaultwarden user as soon as posible to allow login trough bastion
+useradd -m vaultwarden -s /bin/bash
+
+# Upgrade all packages
+apt-get upgrade -y
+
+# Install docker and utilities
 apt-get install -y \
   docker.io \
   zip \
@@ -10,15 +17,14 @@ apt-get install -y \
 # Add docker group
 groupadd docker
 
+# Add user to docker group
+usermod -aG docker vaultwarden
+
 export OCI_CLI_AUTH=instance_principal
 
 # Set root password
 ROOT_PASSWORD_HASH_SECRET_ID=$(curl -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/metadata/root_password_hash_secret_id)
 usermod -p $(oci secrets secret-bundle get --secret-id ${ROOT_PASSWORD_HASH_SECRET_ID} | jq -r '.data."secret-bundle-content".content' | base64 -d) root
-
-# Add vaultwarden user
-useradd -m vaultwarden -s /bin/bash
-usermod -aG docker vaultwarden
 
 # Install ssh public key
 su - vaultwarden -c '
@@ -50,10 +56,10 @@ if [ "${NUM_PARTITIONS}" == 0 ]; then
   parted /dev/oracleoci/oraclevdr --script mklabel gpt
   parted -a optimal /dev/oracleoci/oraclevdr --script mkpart primary ext4 2048 100%
   mkfs.ext4 /dev/oracleoci/oraclevdr1
-  mkdir -p /mnt/persinstent_storage/
+  mkdir -p /mnt/permanent_storage/
 fi
 
-echo "/dev/oracleoci/oraclevdr1 /mnt/persinstent_storage/ ext4 defaults,_netdev,nofail 0 2" >> /etc/fstab
+echo "/dev/oracleoci/oraclevdr1 /mnt/permanent_storage/ ext4 defaults,_netdev,nofail 0 2" >> /etc/fstab
 
 mount -a
 
@@ -64,6 +70,15 @@ cd $HOME
 export APPLICATION_BUCKET=$(curl -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/metadata/application_bucket)
 oci os object get --bucket-name ${APPLICATION_BUCKET} --name application.zip --file - | base64 -d > application.zip
 unzip -o application.zip
+set +x
+'
+
+# Download application 
+su - vaultwarden -c '
+set -x
+cd $HOME/application
+docker compose pull
+docker compose build
 set +x
 '
 
