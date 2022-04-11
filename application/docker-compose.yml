@@ -33,13 +33,17 @@ services:
       - vaultwarden-database-network
 
   caddy-reverse-proxy:
-    image: caddy:2.4.6
+    build:
+      context: ./Caddy-with-plugins
+      args:
+        CADDY_VERSION: 2.4.6
+
+    image: caddy-with-plugins
     restart: always
     depends_on:
       - vaultwarden
       - duck-dns-refresher
     ports:
-      - 80:80
       - 443:443
     volumes:
       - ./Caddy/Caddyfile:/etc/caddy/Caddyfile:ro
@@ -49,7 +53,7 @@ services:
       - DOMAIN=https://${duck_dns_domain}.duckdns.org
       - EMAIL=${email}
       - LOG_FILE=/data/access.log
-      - DUCKDNS_TOKEN=b7f01f47-d75c-4f8f-8787-5fa9d58ec666
+      - DUCK_DNS_TOKEN=b7f01f47-d75c-4f8f-8787-5fa9d58ec666
     networks:
       - caddy-reverse-proxy-network
 

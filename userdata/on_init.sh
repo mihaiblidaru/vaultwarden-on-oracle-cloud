@@ -24,7 +24,7 @@ export OCI_CLI_AUTH=instance_principal
 
 # Set root password
 ROOT_PASSWORD_HASH_SECRET_ID=$(curl -H "Authorization: Bearer Oracle" http://169.254.169.254/opc/v2/instance/metadata/root_password_hash_secret_id)
-usermod -p $(oci secrets secret-bundle get --secret-id ${ROOT_PASSWORD_HASH_SECRET_ID} | jq -r '.data."secret-bundle-content".content' | base64 -d) root
+usermod -p $(oci secrets secret-bundle get --secret-id ${ROOT_PASSWORD_HASH_SECRET_ID} --query 'data."secret-bundle-content".content' --raw-output | base64 -d) root
 
 # Install ssh public key
 su - vaultwarden -c '

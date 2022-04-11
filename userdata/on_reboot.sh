@@ -5,9 +5,8 @@ set -x
 
 su - vaultwarden -c '
 set -x
-source ~/.profile
-date > ~/reboot_time.log
-cd application
+date > ${HOME}/reboot_time.log
+cd ${HOME}/application
 docker compose up -d
 set +x
 '

@@ -21,18 +21,22 @@ vaultwarden_ssh() {
   local managed_session_id=""
 
   managed_session_id=$(oci bastion session list --bastion-id ${bastion_id} --all --display-name "ssh-managed-session-${login_user}-${prev_suffix}" --session-lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
-  TMP_KEY_DIR=/tmp/vaultwarden-managed-ssh-${prev_suffix}/
+  TMP_KEY_DIR=/tmp/vaultwarden-managed-ssh-${login_user}-${prev_suffix}/
 
   if [ "${managed_session_id}" == "" ]; then
     managed_session_id=$(oci bastion session list --bastion-id ${bastion_id} --all --display-name "ssh-managed-session-${login_user}-${suffix}" --session-lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
-    TMP_KEY_DIR=/tmp/vaultwarden-managed-ssh-${suffix}/
+    TMP_KEY_DIR=/tmp/vaultwarden-managed-ssh-${login_user}-${suffix}/
   fi
 
-  mkdir -p ${TMP_KEY_DIR}
+  if [ ! -d ${TMP_KEY_DIR} ]; then
+    managed_session_id=""
+    mkdir -p ${TMP_KEY_DIR}
+  fi
+
   [ ! -f ${TMP_KEY_DIR}/ssh_key.pem ] && ssh-keygen -q -b 4096 -t rsa -f ${TMP_KEY_DIR}/ssh_key.pem -N ""
 
   if [ "${managed_session_id}" == "" ]; then
-    echo -e " \e[33m*\e[0m \e[34mCreating new managed ssh session. This will take some time\e[0m"
+    echo -e " \e[33m*\e[0m \e[34mCreating new managed ssh session. This will take some time...\e[0m"
     cat scripts/create_managed_ssh_session.json.template | \
       jq ".bastionId = \"${bastion_id}\"" | \
       jq ".displayName = \"ssh-managed-session-${login_user}-${suffix}\"" | \

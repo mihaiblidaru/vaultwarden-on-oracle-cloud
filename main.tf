@@ -106,15 +106,6 @@ resource "oci_core_security_list" "vaultwarden_vcn_vaultwarden_subnet_security_l
     }
   }
 
-  ingress_security_rules {
-    protocol    = "6"
-    source      = "0.0.0.0/0"
-    description = "HTTP"
-    tcp_options {
-      max = 80
-      min = 80
-    }
-  }
 
   ingress_security_rules {
     protocol    = "6"
@@ -298,9 +289,9 @@ resource "oci_identity_policy" "vaultwarden_instance_dynamic_group_policy" {
     "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.vaultwarden_backups.name}'",
     "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to manage objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.vaultwarden_backups.name}'",
     "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read secret-bundles in tenancy where target.secret.id='${oci_vault_secret.root_password_hash_secret.id}'",
-
   ]
 }
+
 resource "oci_kms_key" "vaultwarden_kms_key" {
   compartment_id = oci_identity_compartment.identity_compartment.id
   display_name   = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-kms-key"
@@ -310,14 +301,6 @@ resource "oci_kms_key" "vaultwarden_kms_key" {
   }
   management_endpoint = data.oci_kms_vault.vaultwarden_kms_vault.management_endpoint
 }
-
-# resource "oci_kms_vault" "vaultwarden_kms_vault" {
-#     compartment_id = oci_identity_compartment.identity_compartment.id
-#     display_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-kms-vault"
-#     vault_type = "DEFAULT"
-# }
-
-
 
 data "external" "root_password_hash" {
   program = ["scripts/sha512_crypt.sh", "${random_string.instance_root_password_salt.result}", random_password.instance_root_password.result]
