@@ -3,9 +3,11 @@ FROM alpine:3
 RUN apk update
 RUN apk add bash
 RUN apk add \
+        curl \
+        openssl \
         postgresql-client \
+        py3-cryptography \
         py3-pip \
-        py3-cryptography
 
 RUN pip3 install wheel
 RUN pip3 install oci_cli

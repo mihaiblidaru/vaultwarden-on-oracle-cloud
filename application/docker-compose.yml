@@ -29,16 +29,11 @@ services:
       - postgres
 
     networks:
-      - caddy-reverse-proxy-network
+      - reverse-proxy-network
       - vaultwarden-database-network
 
-  caddy-reverse-proxy:
-    build:
-      context: ./Caddy-with-plugins
-      args:
-        CADDY_VERSION: 2.4.6
-
-    image: caddy-with-plugins
+  nginx-reverse-proxy:
+    build: ./nginx-with-certbot-duckdns
     restart: always
     depends_on:
       - vaultwarden
@@ -46,28 +41,14 @@ services:
     ports:
       - 443:443
     volumes:
-      - ./Caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - /mnt/permanent_storage/caddy-config/:/config
-      - /mnt/permanent_storage/caddy-data/:/data
+      - ./nginx-with-certbot-duckdns/nginx.conf:/nginx-template.conf:ro
+      - /mnt/permanent_storage/letsencrypt/:/etc/letsencrypt/
     environment:
-      - DOMAIN=https://${duck_dns_domain}.duckdns.org
+      - DOMAIN=${duck_dns_domain}.duckdns.org
       - EMAIL=${email}
-      - LOG_FILE=/data/access.log
       - DUCK_DNS_TOKEN=b7f01f47-d75c-4f8f-8787-5fa9d58ec666
     networks:
-      - caddy-reverse-proxy-network
-
-  duck-dns-refresher:
-    build: ./duck-dns-refresher
-    image: duck-dns-refresher:latest
-    restart: always
-    
-    environment:
-      - DUCK_DNS_DOMAIN_PREFIX=${duck_dns_domain}
-      - DUCK_DNS_TOKEN=${duck_dns_token}
-      - REFRESH_INTERVAL=300
-    networks:
-      - auxiliary-network
+      - reverse-proxy-network
 
   vaultwarden-backup:
     build: ./vaultwarden-backup
@@ -75,13 +56,14 @@ services:
     restart: always
 
     volumes:
-      - /mnt/permanent_storage/vaultwarden-data/:/vaultwarden-data/
+      - /mnt/permanent_storage/vaultwarden-data/:/vaultwarden-data/:ro
+      - /mnt/permanent_storage/letsencrypt/:/letsencrypt/
     
     environment:
       - DATABASE_URL=postgresql://vaultwarden:password@postgres/vaultwarden
-      - VAULTWARDEN_DATA_DIR=/vaultwarden-data/
       - CRON_EXPRESION=${backup_cron_expresion}
       - BACKUP_BUCKET_NAME=${tf_prefix}-vaultwarden-backups
+      - BACKUPS_PASSWORD_SECRET_ID=${tf_prefix}-vaultwarden-backups-password
 
     networks:
       - auxiliary-network
@@ -95,7 +77,7 @@ services:
 networks:
   vaultwarden-database-network:
     name: vaultwarden-database-network
-  caddy-reverse-proxy-network:
-    name: caddy-reverse-proxy-network
+  reverse-proxy-network:
+    name: reverse-proxy-network
   auxiliary-network:
     name: auxiliary-network

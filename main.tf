@@ -135,6 +135,11 @@ resource "oci_objectstorage_bucket" "vaultwarden_backups" {
   name           = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-backups"
   namespace      = data.oci_objectstorage_namespace.object_storage_namespace.namespace
   versioning     = "Enabled"
+
+  provisioner "local-exec" {
+    command = "oci os object bulk-delete --bucket-name ${self.name} --force; oci os object bulk-delete-versions --bucket-name ${self.name} --force"
+    when = destroy
+  }
 }
 
 resource "oci_objectstorage_object_lifecycle_policy" "vaultwarden_backups_lifecycle_policies" {
@@ -170,16 +175,18 @@ resource "oci_objectstorage_object_lifecycle_policy" "vaultwarden_backups_lifecy
 variable "application_src_files" {
   type = list(string)
   default = [
-    "application/Caddy-with-plugins/Dockerfile",
-    "application/docker-compose.yml",
-    "application/duck-dns-refresher/container_healthcheck.sh",
-    "application/duck-dns-refresher/refresh_duck_dns.sh",
-    "application/duck-dns-refresher/Dockerfile",
-    "application/Caddy/Caddyfile",
-    "application/vaultwarden-backup/container_healthcheck.sh",
-    "application/vaultwarden-backup/vaultwarden_backup.sh",
-    "application/vaultwarden-backup/setup_crontab.sh",
-    "application/vaultwarden-backup/Dockerfile",
+   "./application/docker-compose.yml",
+   "./application/vaultwarden-backup/setup_crontab.sh",
+   "./application/vaultwarden-backup/container_healthcheck.sh",
+   "./application/vaultwarden-backup/vaultwarden_backup.sh",
+   "./application/vaultwarden-backup/Dockerfile",
+   "./application/nginx-with-certbot-duckdns/challenge-hook.sh",
+   "./application/nginx-with-certbot-duckdns/tls_renew_certificate.sh",
+   "./application/nginx-with-certbot-duckdns/container_healthcheck.sh",
+   "./application/nginx-with-certbot-duckdns/cleanup-hook.sh",
+   "./application/nginx-with-certbot-duckdns/init.sh",
+   "./application/nginx-with-certbot-duckdns/nginx.conf",
+   "./application/nginx-with-certbot-duckdns/Dockerfile"
   ]
 }
 
@@ -237,6 +244,12 @@ resource "random_string" "instance_root_password_salt" {
   override_special = "!@#$%-_+:"
 }
 
+resource "random_password" "backups_password" {
+  length           = 24
+  special          = false
+  override_special = "!@#$%-_+:"
+}
+
 resource "oci_core_instance" "vaultwarden_instance" {
   availability_domain = data.oci_identity_availability_domains.availability_domains.availability_domains[0].name
   compartment_id      = oci_identity_compartment.identity_compartment.id
@@ -264,6 +277,7 @@ resource "oci_core_instance" "vaultwarden_instance" {
     user_data_on_reboot          = file("userdata/on_reboot.sh")
     application_bucket           = oci_objectstorage_bucket.application.name
     root_password_hash_secret_id = oci_vault_secret.root_password_hash_secret.id
+    backups_password_secret_id   = oci_vault_secret.backups_password_secret.id 
   }
 
   preserve_boot_volume = false
@@ -289,6 +303,7 @@ resource "oci_identity_policy" "vaultwarden_instance_dynamic_group_policy" {
     "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.vaultwarden_backups.name}'",
     "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to manage objects in tenancy where target.bucket.name='${oci_objectstorage_bucket.vaultwarden_backups.name}'",
     "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read secret-bundles in tenancy where target.secret.id='${oci_vault_secret.root_password_hash_secret.id}'",
+    "Allow dynamic-group ${oci_identity_dynamic_group.vaultwarden_instance_dynamic_group.name} to read secret-bundles in tenancy where target.secret.id='${oci_vault_secret.backups_password_secret.id}'",
   ]
 }
 
@@ -319,6 +334,18 @@ resource "oci_vault_secret" "root_password_secret" {
   }
 
   secret_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-root-password"
+  vault_id    = data.oci_kms_vault.vaultwarden_kms_vault.id
+}
+
+resource "oci_vault_secret" "backups_password_secret" {
+  compartment_id = oci_identity_compartment.identity_compartment.id
+  key_id         = oci_kms_key.vaultwarden_kms_key.id
+  secret_content {
+    content_type = "BASE64"
+    content      = sensitive(base64encode(random_password.backups_password.result))
+  }
+
+  secret_name = "${lookup(local.config_file, "tf_prefix", "tf")}-vaultwarden-backups-password"
   vault_id    = data.oci_kms_vault.vaultwarden_kms_vault.id
 }
 

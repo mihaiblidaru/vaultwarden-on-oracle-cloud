@@ -14,41 +14,56 @@ vaultwarden_ssh() {
   local vaultwarden_compartment=$(oci iam compartment list --name "${tf_prefix}-vaultwarden-compartment" --query 'data[0].id' --raw-output)
   local instance_id=$(oci compute instance list --compartment-id ${vaultwarden_compartment} --display-name "${tf_prefix}-vaultwarden-on-ubuntu" --lifecycle-state RUNNING --query 'data[0].id' --raw-output)
   local bastion_id=$(oci bastion bastion list --compartment-id ${vaultwarden_compartment} --all --name "${tf_prefix}-vaultwarden-ssh-bastion" --bastion-lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
+  local vault_id=$(jq -r '.vault_id' config.json)
+  local managed_session_id=$(oci bastion session list --bastion-id ${bastion_id} --all --display-name "ssh-managed-session-${login_user}" --session-lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
 
-  local suffix=$(date "+%Y%m%d%H")
-  local prev_suffix=$(date -d "-1 hour" "+%Y%m%d%H")
-
-  local managed_session_id=""
-
-  managed_session_id=$(oci bastion session list --bastion-id ${bastion_id} --all --display-name "ssh-managed-session-${login_user}-${prev_suffix}" --session-lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
-  TMP_KEY_DIR=/tmp/vaultwarden-managed-ssh-${login_user}-${prev_suffix}/
+  TMP_DIR=$(mktemp --directory)
 
   if [ "${managed_session_id}" == "" ]; then
-    managed_session_id=$(oci bastion session list --bastion-id ${bastion_id} --all --display-name "ssh-managed-session-${login_user}-${suffix}" --session-lifecycle-state ACTIVE --query 'data[0].id' --raw-output)
-    TMP_KEY_DIR=/tmp/vaultwarden-managed-ssh-${login_user}-${suffix}/
-  fi
+    echo -e " \e[33m*\e[0m \e[34mGenerating new ssh-key...\e[0m"
+    ssh-keygen -q -b 4096 -t rsa -f ${TMP_DIR}/ssh_key.pem -N ""
 
-  if [ ! -d ${TMP_KEY_DIR} ]; then
-    managed_session_id=""
-    mkdir -p ${TMP_KEY_DIR}
-  fi
+    echo -e " \e[33m*\e[0m \e[34mUploading private key to vault...\e[0m"
+    secret_id=$(oci vault secret list --compartment-id ${vaultwarden_compartment} --lifecycle-state ACTIVE --name ssh-managed-session-${login_user}-private-key --query "data[0].id" --raw-output)
 
-  [ ! -f ${TMP_KEY_DIR}/ssh_key.pem ] && ssh-keygen -q -b 4096 -t rsa -f ${TMP_KEY_DIR}/ssh_key.pem -N ""
+    local vault_management_endpoint=$(oci kms management vault get --vault-id ${vault_id} --query 'data."management-endpoint"' --raw-output)
+    local key_id=$(oci kms management key list --compartment-id ${vaultwarden_compartment} --endpoint ${vault_management_endpoint} --all --query "(data[?\"display-name\"=='${tf_prefix}-vaultwarden-kms-key'].id)[0]" --raw-output)
 
-  if [ "${managed_session_id}" == "" ]; then
+    if [ "${secret_id}" == "" ]; then
+      # Create new secret
+      secret_id=$(oci vault secret create-base64 --compartment-id ${vaultwarden_compartment} \
+                   --secret-name=ssh-managed-session-${login_user}-private-key \
+                   --vault-id ${vault_id} \
+                   --key-id ${key_id} \
+                   --secret-content-content $(base64 -w0 ${TMP_DIR}/ssh_key.pem) \
+                   --wait-for-state ACTIVE \
+                   --query "data.id")
+    else
+      # Update existing secret
+      oci vault secret update --secret-id ocid1.vaultsecret.oc1.eu-zurich-1.amaaaaaa2vuy7kaaorsppq3at4e5bnpiyv3m7mwi4dit65w43rggncfxbxua 
+      oci vault secret update --secret-id ${secret_id} \
+        --secret-content "{\"content\": \"$(base64 -w0 ${TMP_DIR}/ssh_key.pem)\", \"contentType\": \"BASE64\"}" \
+        --force
+    fi
+
     echo -e " \e[33m*\e[0m \e[34mCreating new managed ssh session. This will take some time...\e[0m"
     cat scripts/create_managed_ssh_session.json.template | \
       jq ".bastionId = \"${bastion_id}\"" | \
-      jq ".displayName = \"ssh-managed-session-${login_user}-${suffix}\"" | \
+      jq ".displayName = \"ssh-managed-session-${login_user}\"" | \
       jq ".targetResourceId = \"${instance_id}\"" | \
       jq ".targetOsUsername = \"${login_user}\"" | \
-      jq ".sshPublicKeyFile = \"${TMP_KEY_DIR}/ssh_key.pem.pub\"" > ${TMP_KEY_DIR}/create_managed_ssh_session.json
+      jq ".sshPublicKeyFile = \"${TMP_DIR}/ssh_key.pem.pub\"" > ${TMP_DIR}/create_managed_ssh_session.json
 
-    managed_session_id=$(oci bastion session create-managed-ssh --from-json file://${TMP_KEY_DIR}/create_managed_ssh_session.json --query "data.resources[0].identifier" --raw-output)
+    managed_session_id=$(oci bastion session create-managed-ssh --from-json file://${TMP_DIR}/create_managed_ssh_session.json --query "data.resources[0].identifier" --raw-output)
   else
     echo -e " \e[33m*\e[0m \e[34mUsing existing managed ssh session\e[0m"
   fi
 
+  #trap "rm -rf ${TMP_DIR}; trap - RETURN" RETURN
+  oci secrets secret-bundle get --secret-id ${secret_id} --query '.data."secret-bundle-content".content' --raw-output | base64 -d > ${TMP_DIR}/ssh_key.pem
+
   local command=$(oci bastion session get --session-id ${managed_session_id} --query 'data."ssh-metadata".command' --raw-output | sed "s|<privateKey>|${TMP_KEY_DIR}/ssh_key.pem|g")
   eval $command
+
+  #rm -rf ${TMP_DIR}
 }
